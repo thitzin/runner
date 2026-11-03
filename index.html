@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Endless Runner</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#111;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;touch-action:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+/* ================= 1. CONFIG (ajuste aqui) ================= */
+const CONFIG = {
+  initialSpeed: 300, maxSpeed: 700, speedIncrease: 0.07, // px/s ganhos por ponto
+  jumpForce: 800, gravity: 2400,
+  scorePerSecond: 15, coinScore: 0, // moedas NÃO dão pontos
+  coinsForQuiz: 50,
+  debugShowCorrect: true, // TESTE: escreve "(CORRETA)" na alternativa certa; mude para false depois
+  boostDuration: 5000, boostSpeedMul: 1.5, boostShift: 70,
+  magnetDuration: 15000, magnetRadius: 230,
+  multiplierDuration: 10000, multiplierValue: 2,
+  // chances dos powerups (pesos): boost 35 / ímã 35 / multiplicador 27 / escudo 3
+  boostChance: 35, magnetChance: 35, multiplierChance: 27, shieldChance: 3,
+  shieldInvuln: 1.5, quizGrace: 0.7, postEffectInvuln: 0.7, // invencibilidade (s) após quiz / boost / lentidão
+  jumpCutMul: 2.2, // gravidade extra ao soltar o botão na subida (pulo curto)
+  debuffDuration: 15000, crowdDuration: 8000, lowScoreMul: 0.1,
+  slowSpeed: 240, // piso da lentidão (px/s); sobe sozinho se algum buraco exigir
+  projInterval: 1.1, projTelegraph: 0.8, projLock: 0.5, projSpeed: 900, projMax: 3,
+  holeChanceMin: 0.06, holeChanceMax: 0.16, // chance de buraco (cresce com a dificuldade)
+  storageKey: "runner_best"
+};
+
+/* ================= 2. PERGUNTAS (edite aqui) =================
+   correct = índice (0-3) da alternativa certa */
+const A = ["Alternativa A", "Alternativa B", "Alternativa C", "Alternativa D"];
+const quizQuestions = [
+  {question:"Pergunta placeholder 1",answers:A,correct:0},{question:"Pergunta placeholder 2",answers:A,correct:1},
+  {question:"Pergunta placeholder 3",answers:A,correct:2},{question:"Pergunta placeholder 4",answers:A,correct:3},
+  {question:"Pergunta placeholder 5",answers:A,correct:0},{question:"Pergunta placeholder 6",answers:A,correct:1},
+  {question:"Pergunta placeholder 7",answers:A,correct:2},{question:"Pergunta placeholder 8",answers:A,correct:3},
+  {question:"Pergunta placeholder 9",answers:A,correct:0},{question:"Pergunta placeholder 10",answers:A,correct:1},
+  {question:"Pergunta placeholder 11",answers:A,correct:2},{question:"Pergunta placeholder 12",answers:A,correct:3},
+  {question:"Pergunta placeholder 13",answers:A,correct:0},{question:"Pergunta placeholder 14",answers:A,correct:1},
+  {question:"Pergunta placeholder 15",answers:A,correct:2}
+];
+
+/* ================= 3. ÁUDIO (arquivos ausentes não quebram nada) ================= */
+const mk = (f, loop) => { const a = new Audio(); a.loop = !!loop; a.onerror = () => {}; a.src = "assets/" + f; return a; };
+const sounds = {
+  jump: mk("jump.wav"), coin: mk("coin.wav"), hit: mk("hit.wav"), powerup: mk("powerup.wav"),
+  quizCorrect: mk("correct.wav"), quizWrong: mk("wrong.wav"), quizOpen: mk("quiz_open.wav"),
+  shield: mk("shield.wav"), shieldBreak: mk("shield_break.wav"), fall: mk("fall.wav"), gameOver: mk("gameover.wav")
+};
+const musics = { menu: mk("music_menu.wav", 1), play: mk("music_play.wav", 1), over: mk("music_over.wav", 1) };
+let curMusic = null;
+function playSound(n) { try { const s = sounds[n]; s.currentTime = 0; const p = s.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+function playMusic(n) {
+  try {
+    const m = musics[n];
+    if (curMusic === m && !m.paused) return;
+    if (curMusic && curMusic !== m) curMusic.pause();
+    curMusic = m; const p = m.play(); if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
+
+/* ================= 4. CANVAS / ESCALA ================= */
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let W, H, S, SW, SH, dpr, GY; // W,H = mundo lógico; SW,SH = pixels da tela; GY = y do chão
+function resize() {
+  dpr = devicePixelRatio || 1; SW = innerWidth; SH = innerHeight;
+  cv.width = SW * dpr; cv.height = SH * dpr; cv.style.width = SW + "px"; cv.style.height = SH + "px";
+  S = Math.min(SH / 450, SW / 640); W = SW / S; H = SH / S; GY = H * 0.72;
+}
+addEventListener("resize", resize); resize();
+const toWorld = () => ctx.setTransform(dpr * S, 0, 0, dpr * S, 0, 0);
+const toScreen = () => ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+const FS = () => Math.max(14, Math.min(30, Math.min(SW, SH) * 0.045));
+
+/* ================= 5. ESTADO ================= */
+// Alturas (h) são medidas acima do chão. y de tela = GY - h.
+let state = "menu", g = null, lockUntil = 0, menuScroll = 0, last = performance.now();
+let best = (() => { try { return +localStorage.getItem(CONFIG.storageKey) || 0; } catch (e) { return 0; } })();
+const held = new Set(); // teclas/toques pressionados (pulo variável)
+const BASE_PX = 120, SIZE = 40, AIR = 2 * CONFIG.jumpForce / CONFIG.gravity;
+const px = () => BASE_PX + (g ? g.p.shift : 0);
+/* Função centralizada de velocidade (limitada por maxSpeed) */
+const calcSpeed = score => Math.min(CONFIG.maxSpeed, CONFIG.initialSpeed + score * CONFIG.speedIncrease);
+const mulOf = k => { let m = 1; for (const id in g.fx) if (EFFECTS[id][k]) m *= EFFECTS[id][k]; return m; };
+const addScore = n => { g.score += n * mulOf("scoreMul"); };
+const diff = () => Math.min(1, g.score / 3000);
+
+function newGame() {
+  g = { score: 0, coins: 0, nextQuiz: CONFIG.coinsForQuiz, obs: [], coinList: [], parts: [], projs: [], teles: [],
+        fx: {}, used: [], p: { h: 0, vy: 0, grounded: true, buffer: 0, delay: 0, invuln: 0, shift: 0 },
+        since: 0, need: 0, spawnCount: 0, lastType: "", dying: null, bg: 0, time: 0, quiz: null, newRecord: false, projCd: 1, curSpd: CONFIG.initialSpeed };
+  state = "play"; playMusic("play");
+}
+
+/* ================= 6. SISTEMA DE EFEITOS (powerups / debuffs) =================
+   Cada efeito: name, type, duration(ms; 0 = até ser consumido), start/update/end.
+   speedMul / scoreMul são multiplicadores automáticos. */
+const EFFECTS = {
+  boost: { name: "BOOST", type: "buff", weight: CONFIG.boostChance, duration: CONFIG.boostDuration, speedMul: CONFIG.boostSpeedMul, end() { grace(); },
+    update(dt) { if (Math.random() < dt * 40) emit(px() - 4, g.p.h + Math.random() * SIZE, "#ff9800", 1, 60); } }, // destruição de obstáculos está em hurt()
+  magnet: { name: "ÍMÃ", type: "buff", weight: CONFIG.magnetChance, duration: CONFIG.magnetDuration,
+    update(dt) {
+      const cx = px() + SIZE / 2, cy = g.p.h + SIZE / 2;
+      for (const c of g.coinList) { const dx = cx - c.x, dy = cy - c.h, d = Math.hypot(dx, dy);
+        if (d < CONFIG.magnetRadius && d > 1) { const s = Math.min(d, 900 * dt) / d; c.x += dx * s; c.h += dy * s; } }
+    } },
+  multiplier: { name: CONFIG.multiplierValue + "x PONTOS", type: "buff", weight: CONFIG.multiplierChance, duration: CONFIG.multiplierDuration, scoreMul: CONFIG.multiplierValue },
+  shield: { name: "ESCUDO", type: "buff", weight: CONFIG.shieldChance, duration: 0, start() { playSound("shield"); } },
+  lowScore: { name: "PONTOS " + CONFIG.lowScoreMul + "x", type: "debuff", weight: 1, duration: CONFIG.debuffDuration, scoreMul: CONFIG.lowScoreMul },
+  projectiles: { name: "PROJÉTEIS", type: "debuff", weight: 1, duration: CONFIG.debuffDuration,
+    start() { g.projCd = 0.8; g.teles = []; }, end() { g.teles = []; },
+    update(dt) {
+      const cx = px() + SIZE / 2, cy = g.p.h + SIZE / 2;
+      g.projCd -= dt;
+      if (g.projCd <= 0 && g.teles.length < CONFIG.projMax) { // vários ao mesmo tempo
+        g.teles.push({ t: 0, sh: 30 + Math.random() * 140, locked: false, tx: cx, th: cy });
+        g.projCd = CONFIG.projInterval * (0.6 + Math.random() * 0.8); }
+      for (const t of g.teles) { t.t += dt;
+        if (!t.locked) { t.tx = cx; t.th = cy; if (t.t >= CONFIG.projLock) t.locked = true; } // mira trava antes do tiro
+        if (t.t >= CONFIG.projTelegraph) { const sx = W + 20, dx = t.tx - sx, dh = t.th - t.sh, d = Math.hypot(dx, dh);
+          g.projs.push({ x: sx, h: t.sh, vx: dx / d * CONFIG.projSpeed, vh: dh / d * CONFIG.projSpeed }); t.fired = true; } }
+      g.teles = g.teles.filter(t => !t.fired);
+    } },
+  slow: { name: "LENTIDÃO", type: "debuff", weight: 1, duration: CONFIG.debuffDuration, end() { grace(); } }, // velocidade: ver slowTarget()
+  crowd: { name: "MAIS OBSTÁCULOS", type: "debuff", weight: 1, duration: CONFIG.crowdDuration } // usado em spawn()
+};
+const grace = () => { g.p.invuln = Math.max(g.p.invuln, CONFIG.postEffectInvuln); };
+function slowTarget() { // menor velocidade em que TODOS os buracos à frente ainda são puláveis (e obstáculos altos também)
+  let v = CONFIG.slowSpeed;
+  for (const o of g.obs) if (o.type === "hole" && o.x + o.w > px()) v = Math.max(v, (o.w + 58) / AIR);
+  return v;
+}
+function activate(id) {
+  const d = EFFECTS[id];
+  if (g.fx[id]) { if (d.duration) g.fx[id].t = d.duration; return; } // nunca duplica: só renova o tempo
+  g.fx[id] = { t: d.duration }; if (d.start) d.start();
+}
+function deactivate(id) { const d = EFFECTS[id]; if (d.end) d.end(); delete g.fx[id]; }
+function giveEffect(type) { // sorteio ponderado
+  const ids = Object.keys(EFFECTS).filter(i => EFFECTS[i].type === type);
+  let r = Math.random() * ids.reduce((s, i) => s + EFFECTS[i].weight, 0), id = ids[0];
+  for (const i of ids) { r -= EFFECTS[i].weight; if (r <= 0) { id = i; break; } }
+  activate(id); return id;
+}
+function updateEffects(dt) {
+  for (const id in g.fx) { const d = EFFECTS[id], f = g.fx[id]; if (d.update) d.update(dt);
+    if (d.duration) { f.t -= dt * 1000; if (f.t <= 0) deactivate(id); } }
+}
+
+/* ================= 7. SPAWN DE CENÁRIO =================
+   Espaçamento mínimo sempre maior que a distância de um salto => nunca impossível. */
+const OBS = { small: { w: 32, h: 32 }, large: { w: 52, h: 62 }, tall: { w: 30, h: 96 } };
+const tAbove = h => { const v = CONFIG.jumpForce, gr = CONFIG.gravity; return (v - Math.sqrt(Math.max(0, v * v - 2 * gr * h))) / gr; }; // tempo de subida até a altura h
+function pickType(prev, n) { // sorteia o tipo do spawn nº n (prev = tipo anterior)
+  if (n > 4 && prev !== "hole" && Math.random() < CONFIG.holeChanceMin + (CONFIG.holeChanceMax - CONFIG.holeChanceMin) * diff()) return "hole";
+  const pool = ["small", "small", "small"];
+  if (n > 2 && g.score > 150) pool.push("large", "large");
+  if (n > 2 && g.score > 400) pool.push("tall", "tall");
+  return pool[Math.random() * pool.length | 0];
+}
+function minGap(a, bType, spd) { // espaço mínimo (px) entre o obstáculo a e o próximo tipo para dar tempo de aterrissar e pular de novo
+  const lead = t => t === "hole" ? 0 : tAbove(OBS[t].h - 6) * spd;
+  return spd * AIR - a.w - (a.type === "hole" ? -26 : lead(a.type)) + lead(bType);
+}
+function spawn() {
+  const lvl = diff(), base = calcSpeed(g.score), D = base * AIR; g.spawnCount++;
+  const type = g.nextType || pickType("", g.spawnCount);
+  const o = type === "hole"
+    ? { type, x: W + 60, h: 0, w: Math.max(70, Math.min(240, D * 0.7 * (0.45 + Math.random() * 0.15))) }
+    : { type, x: W + 60, w: OBS[type].w, h: OBS[type].h };
+  g.obs.push(o); g.lastType = type;
+  g.nextType = pickType(type, g.spawnCount + 1); // próximo tipo já definido => espaçamento exato
+  const normalGap = D * 1.25 + 90 + Math.random() * 280 * (1 - 0.6 * lvl);
+  // "mais obstáculos": só o mínimo pulável + folga pequena (sempre possível)
+  const crowdGap = Math.max(140, minGap(o, g.nextType, base) + base * (0.14 + Math.random() * 0.1));
+  const gap = g.fx.crowd ? crowdGap : normalGap;
+  g.since = 0; g.need = o.w + gap;
+  const grp = (n, f) => { for (let i = 0; i < n; i++) g.coinList.push(Object.assign({ r: 12 }, f(i, n, Math.sin(Math.PI * i / (n - 1))))); };
+  const avg = D * 1.25 + 90 + 140 * (1 - 0.6 * lvl);
+  const coinP = g.fx.crowd ? Math.min(1, (o.w + gap) / (o.w + avg)) : 1; // crowd: moedas por distância continuam normais
+  const gx = o.x + o.w + gap * 0.5, arc = Math.random() < 0.5;
+  if (Math.random() < coinP) {
+    const n = Math.min(4 + (Math.random() * 4 | 0), Math.max(2, Math.floor((gap - 30) / 38)));
+    grp(n, (i, n, k) => ({ x: gx + (i - (n - 1) / 2) * 38, h: 24 + (arc ? k * 70 : 0) })); // grupo entre obstáculos
+    if (type !== "tall" && Math.random() < 0.6) grp(5, (i, n, k) => ({ x: o.x + o.w / 2 + (i - (n - 1) / 2) * 38, h: o.h + 34 + k * 30 })); // arco sobre o obstáculo
+  }
+}
+function emit(x, h, color, n, sp) {
+  for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, v = Math.random() * sp;
+    g.parts.push({ x, h, vx: Math.cos(a) * v, vh: Math.sin(a) * v, life: 0.5, color }); }
+}
+
+/* ================= 8. JOGADOR / DANO ================= */
+function jumpNow() { const p = g.p; p.vy = CONFIG.jumpForce; p.grounded = false; playSound("jump"); emit(px() + 20, 0, "#ccc", 5, 80); }
+function requestJump() { // um evento = no máximo um pulo; sem double jump
+  const p = g.p; if (g.dying) return;
+  if (p.grounded) jumpNow();
+  else p.buffer = 0.12; // buffer: toque pouco antes de aterrissar
+}
+function die(kind) { if (g.dying) return; g.dying = { t: 0, kind }; playSound(kind === "fall" ? "fall" : "hit"); }
+function hurt(t) { // obstáculo ou projétil encostou
+  const p = g.p;
+  if (g.fx.boost) { t.dead = true; emit(t.x, t.h || 20, "#ff9800", 12, 220); playSound("hit"); } // boost destrói (sem pontos)
+  else if (p.invuln > 0) return;
+  else if (g.fx.shield) { t.dead = true; deactivate("shield"); p.invuln = CONFIG.shieldInvuln; playSound("shieldBreak"); emit(px() + 20, p.h + 20, "#4dd0e1", 16, 240); }
+  else die("hit");
+}
+function gameOver() {
+  const f = Math.floor(g.score);
+  if (f > best) { best = f; g.newRecord = true; try { localStorage.setItem(CONFIG.storageKey, best); } catch (e) {} }
+  state = "over"; lockUntil = performance.now() + 700; playSound("gameOver"); playMusic("over");
+}
+
+/* ================= 9. UPDATE ================= */
+function updateParts(dt) { for (const q of g.parts) { q.life -= dt; q.x += q.vx * dt; q.h += q.vh * dt; } g.parts = g.parts.filter(q => q.life > 0); }
+function update(dt) {
+  const p = g.p; updateParts(dt);
+  if (g.dying) { g.dying.t += dt; if (g.dying.kind === "fall") { p.vy -= CONFIG.gravity * dt; p.h += p.vy * dt; } if (g.dying.t > 0.8) gameOver(); return; }
+  g.time += dt; updateEffects(dt);
+  let tgt = calcSpeed(g.score) * mulOf("speedMul");
+  if (g.fx.slow) tgt = Math.min(tgt, slowTarget()); // lentidão = mínimo possível sem tornar nada impossível
+  g.curSpd += (tgt - g.curSpd) * Math.min(1, dt * 4); // transição suave
+  const spd = g.curSpd, dx = spd * dt; g.bg += dx;
+  addScore(CONFIG.scorePerSecond * (spd / CONFIG.initialSpeed) * dt); // pontos proporcionais à velocidade atual
+  p.shift += ((g.fx.boost ? CONFIG.boostShift : 0) - p.shift) * Math.min(1, dt * 6);
+  if (p.invuln > 0) p.invuln -= dt;
+  if (p.buffer > 0) p.buffer -= dt;
+  // física vertical
+  // pulo variável: soltar o botão durante a subida aumenta a gravidade (pulo curto); segurar = pulo completo
+  p.vy -= CONFIG.gravity * (p.vy > 0 && !held.size ? CONFIG.jumpCutMul : 1) * dt; p.h += p.vy * dt;
+  const cx = px() + SIZE / 2;
+  const overHole = g.obs.some(o => o.type === "hole" && cx > o.x + 6 && cx < o.x + o.w - 6);
+  if (p.h <= 0) {
+    if (overHole) { die("fall"); return; } // buraco ignora boost e escudo
+    p.h = 0; p.vy = 0;
+    if (!p.grounded) { p.grounded = true; if (p.buffer > 0) { p.buffer = 0; requestJump(); } }
+  } else p.grounded = false;
+  // mundo
+  for (const o of g.obs) o.x -= dx; for (const c of g.coinList) c.x -= dx;
+  g.since += dx; if (g.since >= g.need) spawn();
+  // colisão com obstáculos
+  for (const o of g.obs) if (o.type !== "hole" && px() + 7 < o.x + o.w - 2 && px() + SIZE - 7 > o.x + 2 && p.h + 4 < o.h - 2) hurt(o);
+  // projéteis
+  for (const q of g.projs) { q.x += q.vx * dt; q.h += q.vh * dt;
+    if (Math.abs(q.x - cx) < SIZE / 2 + 3 && Math.abs(q.h - (p.h + SIZE / 2)) < SIZE / 2 + 3) hurt(q); }
+  // moedas
+  for (const c of g.coinList) if (Math.hypot(c.x - cx, c.h - (p.h + SIZE / 2)) < c.r + SIZE / 2 + 6) {
+    c.dead = true; g.coins++; addScore(CONFIG.coinScore); playSound("coin"); emit(c.x, c.h, "#ffd600", 6, 120); }
+  g.obs = g.obs.filter(o => !o.dead && o.x + o.w > -80);
+  g.coinList = g.coinList.filter(c => !c.dead && c.x > -50);
+  g.projs = g.projs.filter(q => !q.dead && q.x > -50 && q.h > -50);
+  if (g.coins >= g.nextQuiz) openQuiz();
+}
+
+/* ================= 10. QUIZ ================= */
+function pickQuestion() { // sem repetir até esgotar as 15
+  let pool = quizQuestions.map((_, i) => i).filter(i => !g.used.includes(i));
+  if (!pool.length) { g.used = []; pool = quizQuestions.map((_, i) => i); }
+  const i = pool[Math.random() * pool.length | 0]; g.used.push(i); return quizQuestions[i];
+}
+function openQuiz() { g.nextQuiz += CONFIG.coinsForQuiz; g.quiz = { q: pickQuestion(), state: "ask", t: 0, buttons: [] }; state = "quiz"; playSound("quizOpen"); }
+function answerQuiz(i) {
+  const q = g.quiz; q.pick = i; q.ok = i === q.q.correct; q.state = "result"; q.t = 0;
+  const id = giveEffect(q.ok ? "buff" : "debuff");
+  q.msg = (q.ok ? "CORRETO! " : "ERROU! ") + EFFECTS[id].name;
+  playSound(q.ok ? "quizCorrect" : "quizWrong"); if (q.ok) playSound("powerup");
+}
+function updateQuiz(dt) { const q = g.quiz; if (q.state === "result") { q.t += dt; if (q.t > 1.4) { state = "play"; g.quiz = null; g.p.invuln = Math.max(g.p.invuln, CONFIG.quizGrace); } } }
+
+/* ================= 11. RENDER / PLACEHOLDERS (troque por sprites aqui) ================= */
+const sy = h => GY - h;
+function drawBackground(scroll) { // FUNDO
+  ctx.fillStyle = "#87ceeb"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#fff"; for (let i = 0; i < 6; i++) { const x = ((i * 260 - scroll * 0.1) % (W + 300) + W + 300) % (W + 300) - 150; ctx.fillRect(x, GY - 250 - (i % 3) * 40, 90, 24); }
+  ctx.fillStyle = "#7fb88a"; for (let i = 0; i < 8; i++) { const x = ((i * 200 - scroll * 0.25) % (W + 300) + W + 300) % (W + 300) - 150; ctx.fillRect(x, GY - 50 - (i * 37 % 50), 150, 200); }
+  ctx.fillStyle = "#6b4f2a"; ctx.fillRect(0, GY, W, H - GY);
+  ctx.fillStyle = "#4caf50"; ctx.fillRect(0, GY, W, 8);
+  ctx.fillStyle = "#5a4222"; for (let x = -(scroll % 80); x < W; x += 80) ctx.fillRect(x, GY + 30, 40, 5);
+}
+function drawHole(o) { ctx.fillStyle = "#000"; ctx.fillRect(o.x, GY, o.w, H - GY); }                         // BURACO
+function drawObstacle(o) { ctx.fillStyle = o.type === "small" ? "#e53935" : o.type === "large" ? "#b71c1c" : "#ff5722"; ctx.fillRect(o.x, GY - o.h, o.w, o.h); } // OBSTÁCULOS
+function drawCoin(c) { ctx.fillStyle = "#ffd600"; ctx.beginPath(); ctx.arc(c.x, sy(c.h), c.r, 0, 6.28); ctx.fill(); ctx.strokeStyle = "#b28900"; ctx.stroke(); } // MOEDAS
+function drawProjectile(q) { ctx.fillStyle = "#e91e63"; ctx.beginPath(); ctx.arc(q.x, sy(q.h), 9, 0, 6.28); ctx.fill(); }
+function drawPlayer(p, t) { // PERSONAGEM + efeitos visuais
+  const x = px(), y = sy(p.h) - SIZE;
+  if (g && p.invuln > 0 && Math.floor(t * 12) % 2) return; // pisca
+  if (g && g.fx.boost) { ctx.fillStyle = "rgba(255,152,0,.45)"; ctx.fillRect(x - 24, y + 4, 28, SIZE - 8); ctx.fillRect(x - 10, y - 4, SIZE + 20, SIZE + 8); }
+  ctx.fillStyle = "#1e88e5"; ctx.fillRect(x, y, SIZE, SIZE);
+  ctx.fillStyle = "#fff"; ctx.fillRect(x + 24, y + 8, 10, 10);
+  if (g && g.fx.shield) { ctx.strokeStyle = "#4dd0e1"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x + SIZE / 2, y + SIZE / 2, SIZE * 0.85, 0, 6.28); ctx.stroke(); }
+  if (g && g.fx.magnet) { ctx.strokeStyle = "rgba(255,214,0,.35)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x + SIZE / 2, y + SIZE / 2, CONFIG.magnetRadius, 0, 6.28); ctx.stroke(); }
+}
+function txt(t, x, y, size, color, align) { ctx.font = "bold " + size + "px monospace"; ctx.textAlign = align || "center"; ctx.fillStyle = color || "#fff"; ctx.fillText(t, x, y); }
+function wrap(t, maxW) { const L = []; let l = ""; for (const s of t.split(" ")) { const n = l ? l + " " + s : s; if (ctx.measureText(n).width > maxW && l) { L.push(l); l = s; } else l = n; } L.push(l); return L; }
+
+function draw() {
+  toWorld();
+  const gg = state === "menu" ? null : g;
+  drawBackground(gg ? gg.bg : menuScroll);
+  if (gg) {
+    gg.obs.forEach(o => o.type === "hole" && drawHole(o)); gg.obs.forEach(o => o.type !== "hole" && drawObstacle(o));
+    gg.coinList.forEach(drawCoin); gg.projs.forEach(drawProjectile);
+    for (const t of gg.teles) { // telegraph dos projéteis
+      const on = Math.floor(t.t * 10) % 2 === 0;
+      ctx.strokeStyle = t.locked ? "rgba(255,0,0,.8)" : "rgba(255,120,0,.4)"; ctx.lineWidth = t.locked ? 3 : 1; ctx.setLineDash([10, 8]);
+      ctx.beginPath(); ctx.moveTo(W, sy(t.sh)); ctx.lineTo(t.tx, sy(t.th)); ctx.stroke(); ctx.setLineDash([]);
+      if (on) txt("!", W - 24, sy(t.sh) + 12, 36, "#f00");
+    }
+    drawPlayer(gg.p, gg.time);
+    ctx.fillStyle = "#fff"; for (const q of gg.parts) ctx.fillRect(q.x, sy(q.h), 4, 4);
+    if (gg.fx.boost) { ctx.fillStyle = "rgba(255,255,255,.5)"; for (let i = 0; i < 6; i++) ctx.fillRect(((i * 170 - gg.time * 1400) % W + W) % W, GY - 20 - i * 40, 90, 2); }
+  } else drawPlayer({ h: Math.abs(Math.sin(menuScroll / 25)) * 6, invuln: 0 }, 0);
+  toScreen(); const fs = FS(), cx = SW / 2, cy = SH / 2;
+  if (state === "menu") {
+    ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.fillRect(0, 0, SW, SH);
+    txt("ENDLESS RUNNER", cx, cy - fs * 2, fs * 2);
+    txt("RECORDE: " + best, cx, cy, fs, "#ffd600");
+    if (Math.floor(performance.now() / 500) % 2) { ctx.font = "bold " + fs * .8 + "px monospace"; wrap("TOQUE / CLIQUE / PRESSIONE QUALQUER TECLA PARA JOGAR", SW * .85).forEach((l, i) => txt(l, cx, cy + fs * 2 + i * fs, fs * .8)); }
+  } else if (state === "play" || state === "quiz" || state === "over") {
+    if (state !== "over") hud(fs);
+    if (state === "quiz") drawQuiz(fs);
+    if (state === "over") {
+      ctx.fillStyle = "rgba(0,0,0,.7)"; ctx.fillRect(0, 0, SW, SH);
+      txt("GAME OVER", cx, cy - fs * 3, fs * 2, "#ff5252");
+      txt("PONTUAÇÃO: " + Math.floor(g.score), cx, cy - fs, fs);
+      txt("RECORDE: " + best, cx, cy + fs * .5, fs, "#ffd600");
+      if (g.newRecord) txt("NOVO RECORDE!", cx, cy + fs * 2, fs * 1.2, "#69f0ae");
+      ctx.font = "bold " + fs * .8 + "px monospace"; wrap("TOQUE / CLIQUE / PRESSIONE QUALQUER TECLA", SW * .85).forEach((l, i) => txt(l, cx, cy + fs * 4 + i * fs, fs * .8));
+    }
+  }
+}
+function hud(fs) { // interface de jogo
+  txt("PONTOS: " + String(Math.floor(g.score)).padStart(4, "0"), 12, fs + 8, fs, "#fff", "left");
+  txt("MOEDAS: " + String(g.coins).padStart(3, "0"), 12, fs * 2.3 + 8, fs, "#ffd600", "left");
+  let y = 8;
+  for (const id in g.fx) {
+    const d = EFFECTS[id], f = g.fx[id], label = d.name + (d.duration ? " " + Math.ceil(f.t / 1000) + "s" : "");
+    ctx.font = "bold " + fs * .7 + "px monospace"; const w = ctx.measureText(label).width + 16, h = fs * 1.1;
+    ctx.fillStyle = d.type === "buff" ? "rgba(0,120,60,.9)" : "rgba(180,20,20,.9)"; ctx.fillRect(SW - w - 8, y, w, h);
+    txt(label, SW - w / 2 - 8, y + h * .72, fs * .7); y += h + 4;
+  }
+  if (g.fx.crowd) txt("MUITOS OBSTÁCULOS!", SW / 2, fs * 4, fs * .9, "#ff8a80");
+}
+function drawQuiz(fs) {
+  const q = g.quiz; ctx.fillStyle = "rgba(0,0,0,.82)"; ctx.fillRect(0, 0, SW, SH);
+  const bw = Math.min(SW * .9, 720), bx = (SW - bw) / 2, bh = fs * 3, gap = fs * .5;
+  ctx.font = "bold " + fs + "px monospace"; const ql = wrap(q.q.question, bw);
+  let y = Math.max(8, (SH - (fs * 3 + ql.length * fs * 1.3 + 4 * (bh + gap) + fs * 2)) / 2);
+  txt("QUIZ!", SW / 2, y + fs, fs, "#ffd600"); y += fs * 1.8;
+  ql.forEach(l => { txt(l, SW / 2, y + fs, fs); y += fs * 1.3; }); y += fs * .6;
+  q.buttons = [];
+  q.q.answers.forEach((a, i) => {
+    let c = "#3949ab"; if (q.state === "result") c = i === q.q.correct ? "#2e7d32" : i === q.pick ? "#c62828" : "#444";
+    ctx.fillStyle = c; ctx.fillRect(bx, y, bw, bh); q.buttons.push({ x: bx, y, w: bw, h: bh });
+    ctx.font = "bold " + fs * .85 + "px monospace"; const L = wrap("[" + "ABCD"[i] + "] " + a + (CONFIG.debugShowCorrect && i === q.q.correct ? " (CORRETA)" : ""), bw - 16).slice(0, 2);
+    L.forEach((l, k) => txt(l, SW / 2, y + bh / 2 + (k - (L.length - 1) / 2) * fs + fs * .3, fs * .85)); y += bh + gap;
+  });
+  if (q.state === "result") txt(q.msg, SW / 2, y + fs, fs, q.ok ? "#69f0ae" : "#ff8a80");
+}
+
+/* ================= 12. INPUT (teclado / mouse / toque) ================= */
+function onInput(e) {
+  const now = performance.now(); if (now < lockUntil) return;
+  if (state === "menu") { playMusic("menu"); newGame(); lockUntil = now + 150; }
+  else if (state === "play") requestJump();
+  else if (state === "quiz") {
+    const q = g.quiz; if (q.state !== "ask") return; let i = -1;
+    if (e.type === "keydown") i = "1234".indexOf(e.key) >= 0 ? "1234".indexOf(e.key) : "abcd".indexOf(e.key.toLowerCase());
+    else i = q.buttons.findIndex(b => e.clientX >= b.x && e.clientX <= b.x + b.w && e.clientY >= b.y && e.clientY <= b.y + b.h);
+    if (i >= 0) answerQuiz(i);
+  } else if (state === "over") { state = "menu"; playMusic("menu"); lockUntil = now + 300; } // volta ao MENU
+}
+addEventListener("keydown", e => { if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return; if (e.key === " " || e.key.startsWith("Arrow")) e.preventDefault(); held.add(e.code); onInput(e); });
+addEventListener("keyup", e => held.delete(e.code));
+cv.addEventListener("pointerdown", e => { e.preventDefault(); held.add("p" + e.pointerId); onInput(e); });
+addEventListener("pointerup", e => held.delete("p" + e.pointerId));
+addEventListener("pointercancel", e => held.delete("p" + e.pointerId));
+addEventListener("blur", () => held.clear());
+addEventListener("contextmenu", e => e.preventDefault());
+
+/* ================= 13. LOOP ================= */
+function frame(t) {
+  const dt = Math.min(0.033, (t - last) / 1000); last = t;
+  if (state === "menu") menuScroll += 100 * dt; else if (state === "play") update(dt); else if (state === "quiz") updateQuiz(dt);
+  draw(); requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
