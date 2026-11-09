@@ -19,7 +19,6 @@ const CONFIG = {
   jumpForce: 800, gravity: 2400,
   scorePerSecond: 15, coinScore: 0, // moedas NÃO dão pontos
   coinsForQuiz: 50,
-  debugShowCorrect: true, // TESTE: escreve "(CORRETA)" na alternativa certa; mude para false depois
   boostDuration: 5000, boostSpeedMul: 1.5, boostShift: 70,
   magnetDuration: 15000, magnetRadius: 230,
   multiplierDuration: 10000, multiplierValue: 2,
@@ -36,16 +35,22 @@ const CONFIG = {
 
 /* ================= 2. PERGUNTAS (edite aqui) =================
    correct = índice (0-3) da alternativa certa */
-const A = ["Alternativa A", "Alternativa B", "Alternativa C", "Alternativa D"];
 const quizQuestions = [
-  {question:"Pergunta placeholder 1",answers:A,correct:0},{question:"Pergunta placeholder 2",answers:A,correct:1},
-  {question:"Pergunta placeholder 3",answers:A,correct:2},{question:"Pergunta placeholder 4",answers:A,correct:3},
-  {question:"Pergunta placeholder 5",answers:A,correct:0},{question:"Pergunta placeholder 6",answers:A,correct:1},
-  {question:"Pergunta placeholder 7",answers:A,correct:2},{question:"Pergunta placeholder 8",answers:A,correct:3},
-  {question:"Pergunta placeholder 9",answers:A,correct:0},{question:"Pergunta placeholder 10",answers:A,correct:1},
-  {question:"Pergunta placeholder 11",answers:A,correct:2},{question:"Pergunta placeholder 12",answers:A,correct:3},
-  {question:"Pergunta placeholder 13",answers:A,correct:0},{question:"Pergunta placeholder 14",answers:A,correct:1},
-  {question:"Pergunta placeholder 15",answers:A,correct:2}
+  {question:"Considerando o avanço da autonomia das máquinas, qual mudança é esperada na forma como elas poderão atuar no futuro?",answers:["Passarão a depender cada vez mais de instruções humanas para qualquer tarefa.", "Poderão realizar tarefas e tomar decisões com menor intervenção humana.", "Desenvolverão sentimentos e consciência semelhantes aos humanos.", "Deixarão de precisar de qualquer tipo de supervisão."],correct:1},
+  {question:"Se as máquinas passarem a tomar decisões com menos intervenção humana, qual consequência é destacada pela fonte?",answers:["Os humanos precisarão deixar de utilizar essas máquinas.", "As máquinas deverão funcionar de maneira completamente independente.", "Será necessário manter cuidados e supervisão sobre seu funcionamento.", "Todas as decisões deverão obrigatoriamente ser tomadas por pessoas."],correct:2},
+  {question:"A maior autonomia das máquinas não significa que elas devam funcionar sem acompanhamento. Qual ideia da fonte explica melhor essa afirmação?",answers:["Quanto maior a autonomia, maior a importância de cuidados e supervisão.", "As máquinas não serão capazes de realizar tarefas por conta própria.", "A tecnologia deverá ser completamente retirada do cotidiano.", "Os humanos deverão eliminar máquinas que possuam autonomia."],correct:0},
+  {question:"Ao considerar a presença da Inteligência Artificial na sociedade, qual tendência é apresentada pela fonte?",answers:["Sua utilização ficará restrita a determinados ambientes industriais.", "Sua presença se tornará cada vez mais comum no cotidiano.", "Sua utilização ocorrerá apenas em computadores de tecnologias antigas.", "Seu uso ficará limitado principalmente às atividades escolares."],correct:1},
+  {question:"Se uma pessoa utiliza uma IA para ajudá-la a analisar determinado problema, mas continua pensando e tomando a decisão final, qual princípio da fonte está sendo seguido?",answers:["A substituição completa do pensamento humano pela IA.", "A eliminação da necessidade de decisões humanas.", "O uso da IA como auxílio, sem substituir o pensamento humano.", "A transferência de todas as decisões para as máquinas."],correct:2},
+  {question:"Qual situação melhor representa a relação entre humanos e Inteligência Artificial defendida pela fonte?",answers:["Uma pessoa aceita todas as decisões da IA sem analisá-las.", "Uma pessoa utiliza a IA como ferramenta de auxílio, mantendo sua própria capacidade de pensar e decidir.", "Uma pessoa evita completamente a IA por considerar que humanos não devem utilizá-la.", "Uma pessoa deixa que a IA tome todas as decisões importantes sem intervenção humana."],correct:1},
+  {question:"Uma pessoa recebe uma resposta de uma IA e percebe posteriormente que a informação estava incorreta. Qual característica da IA está diretamente relacionada a essa situação?",answers:["A capacidade de nunca cometer erros.", "A existência de sentimentos próprios.", "A possibilidade de cometer erros.", "A existência de consciência."],correct:2},
+  {question:"Ao diferenciar a Inteligência Artificial dos seres humanos, qual característica é apontada pela fonte como uma limitação da IA?",answers:["A IA possui sentimentos e consciência, mas precisa de supervisão.", "A IA possui sentimentos, embora não tenha consciência.", "A IA possui consciência, embora não tenha sentimentos.", "A IA não possui sentimentos nem consciência."],correct:3},
+  {question:"Por que uma resposta produzida por uma IA pode exigir análise humana antes de ser considerada adequada?",answers:["Porque a IA pode reproduzir preconceitos.", "Porque a IA pode desenvolver sentimentos humanos.", "Porque a IA possui consciência própria.", "Porque todo pensamento produzido pela IA é necessariamente independente."],correct:0},
+  {question:"Uma IA é utilizada para auxiliar uma pessoa em determinada tarefa, mas sua resposta precisa ser analisada antes de ser utilizada. Qual conjunto de características justifica essa necessidade?",answers:["A IA não consegue realizar tarefas e não pode ser utilizada no cotidiano.", "A IA pode cometer erros e reproduzir preconceitos.", "A IA possui sentimentos e consciência, por isso precisa ser controlada.", "A IA não pode participar de atividades realizadas por seres humanos."],correct:1},
+  {question:"Uma pessoa recebe uma informação gerada por uma IA e pretende utilizá-la para tomar uma decisão. Qual atitude está mais de acordo com o uso consciente e responsável apresentado na fonte?",answers:["Aceitar a informação imediatamente, pois foi produzida por uma IA.", "Compartilhar os dados utilizados sem considerar sua proteção.", "Verificar a informação antes de utilizá-la.", "Passar a depender da IA para todas as decisões futuras."],correct:2},
+  {question:"Ao utilizar ferramentas de Inteligência Artificial, qual cuidado é apresentado pela fonte como parte de uma utilização consciente e responsável?",answers:["Proteger somente os aparelhos utilizados para acessar a tecnologia.", "Proteger os dados pessoais envolvidos na utilização da tecnologia.", "Garantir proteção apenas para as próprias máquinas.", "Restringir a proteção às informações presentes nas redes sociais."],correct:1},
+  {question:"Uma pessoa passa a utilizar uma ferramenta tecnológica para praticamente todas as suas decisões e deixa de analisar as situações por conta própria. Qual princípio do uso responsável está sendo desrespeitado?",answers:["A necessidade de verificar informações.", "A importância de proteger dados pessoais.", "A utilização consciente da tecnologia.", "A recomendação de não depender totalmente da tecnologia."],correct:3},
+  {question:"Uma pessoa deseja utilizar uma ferramenta de IA de maneira responsável no cotidiano. Qual conjunto de ações está mais de acordo com as orientações apresentadas na fonte?",answers:["Verificar informações, proteger dados pessoais e evitar depender totalmente da tecnologia.", "Compartilhar dados pessoais, aceitar informações sem verificar e utilizar a IA para todas as decisões.", "Confiar automaticamente nas respostas da IA e deixar que ela substitua o pensamento humano.", "Transferir decisões para a tecnologia, evitando verificar informações produzidas por ela."],correct:0},
+  {question:"Considerando conjuntamente as limitações apresentadas pela fonte, qual alternativa melhor representa por que a IA ainda necessita de acompanhamento humano?",answers:["Porque possui sentimentos, consciência e capacidade de evitar erros.", "Porque pode cometer erros, não possui consciência e pode reproduzir preconceitos.", "Porque nunca comete erros, possui sentimentos e funciona sem supervisão.", "Porque possui consciência, toma decisões perfeitas e não reproduz preconceitos."],correct:1}
 ];
 
 /* ================= 3. ÁUDIO (arquivos ausentes não quebram nada) ================= */
@@ -95,7 +100,7 @@ const diff = () => Math.min(1, g.score / 3000);
 
 function newGame() {
   g = { score: 0, coins: 0, nextQuiz: CONFIG.coinsForQuiz, obs: [], coinList: [], parts: [], projs: [], teles: [],
-        fx: {}, used: [], p: { h: 0, vy: 0, grounded: true, buffer: 0, delay: 0, invuln: 0, shift: 0 },
+        fx: {}, p: { h: 0, vy: 0, grounded: true, buffer: 0, delay: 0, invuln: 0, shift: 0 },
         since: 0, need: 0, spawnCount: 0, lastType: "", dying: null, bg: 0, time: 0, quiz: null, newRecord: false, projCd: 1, curSpd: CONFIG.initialSpeed };
   state = "play"; playMusic("play");
 }
@@ -261,10 +266,11 @@ function update(dt) {
 }
 
 /* ================= 10. QUIZ ================= */
-function pickQuestion() { // sem repetir até esgotar as 15
-  let pool = quizQuestions.map((_, i) => i).filter(i => !g.used.includes(i));
-  if (!pool.length) { g.used = []; pool = quizQuestions.map((_, i) => i); }
-  const i = pool[Math.random() * pool.length | 0]; g.used.push(i); return quizQuestions[i];
+let usedQuestions = []; // global: sobrevive entre partidas (só zera ao recarregar a página ou ao esgotar todas)
+function pickQuestion() { // sorteia sem repetir até esgotar todas
+  let pool = quizQuestions.map((_, i) => i).filter(i => !usedQuestions.includes(i));
+  if (!pool.length) { usedQuestions = []; pool = quizQuestions.map((_, i) => i); }
+  const i = pool[Math.random() * pool.length | 0]; usedQuestions.push(i); return quizQuestions[i];
 }
 function openQuiz() { g.nextQuiz += CONFIG.coinsForQuiz; g.quiz = { q: pickQuestion(), state: "ask", t: 0, buttons: [] }; state = "quiz"; playSound("quizOpen"); }
 function answerQuiz(i) {
@@ -349,21 +355,29 @@ function hud(fs) { // interface de jogo
   }
   if (g.fx.crowd) txt("MUITOS OBSTÁCULOS!", SW / 2, fs * 4, fs * .9, "#ff8a80");
 }
-function drawQuiz(fs) {
+function drawQuiz(fs) { // layout dinâmico: botões crescem com o texto e a fonte encolhe se não couber na tela
   const q = g.quiz; ctx.fillStyle = "rgba(0,0,0,.82)"; ctx.fillRect(0, 0, SW, SH);
-  const bw = Math.min(SW * .9, 720), bx = (SW - bw) / 2, bh = fs * 3, gap = fs * .5;
-  ctx.font = "bold " + fs + "px monospace"; const ql = wrap(q.q.question, bw);
-  let y = Math.max(8, (SH - (fs * 3 + ql.length * fs * 1.3 + 4 * (bh + gap) + fs * 2)) / 2);
-  txt("QUIZ!", SW / 2, y + fs, fs, "#ffd600"); y += fs * 1.8;
-  ql.forEach(l => { txt(l, SW / 2, y + fs, fs); y += fs * 1.3; }); y += fs * .6;
+  const bw = Math.min(SW * .9, 720), bx = (SW - bw) / 2, mar = 8;
+  let k = 1, f, fa, lh, pad, gap, ql, al, bhs, total;
+  for (let it = 0; it < 20; it++) {
+    f = fs * k; fa = f * .8; lh = fa * 1.25; pad = fa * .55; gap = f * .35;
+    ctx.font = "bold " + f + "px monospace"; ql = wrap(q.q.question, bw);
+    ctx.font = "bold " + fa + "px monospace"; al = q.q.answers.map((a, i) => wrap("[" + "ABCD"[i] + "] " + a, bw - 20));
+    bhs = al.map(l => l.length * lh + pad * 2);
+    total = f * 1.8 + ql.length * f * 1.3 + f * .6 + bhs.reduce((s, h) => s + h + gap, 0) + f * 1.6;
+    if (total <= SH - mar * 2 || f < 8) break; k *= .93;
+  }
+  let y = Math.max(mar, (SH - total) / 2);
+  txt("QUIZ!", SW / 2, y + f, f, "#ffd600"); y += f * 1.8;
+  ctx.font = "bold " + f + "px monospace"; ql.forEach(l => { txt(l, SW / 2, y + f, f); y += f * 1.3; }); y += f * .6;
   q.buttons = [];
-  q.q.answers.forEach((a, i) => {
+  al.forEach((L, i) => {
     let c = "#3949ab"; if (q.state === "result") c = i === q.q.correct ? "#2e7d32" : i === q.pick ? "#c62828" : "#444";
-    ctx.fillStyle = c; ctx.fillRect(bx, y, bw, bh); q.buttons.push({ x: bx, y, w: bw, h: bh });
-    ctx.font = "bold " + fs * .85 + "px monospace"; const L = wrap("[" + "ABCD"[i] + "] " + a + (CONFIG.debugShowCorrect && i === q.q.correct ? " (CORRETA)" : ""), bw - 16).slice(0, 2);
-    L.forEach((l, k) => txt(l, SW / 2, y + bh / 2 + (k - (L.length - 1) / 2) * fs + fs * .3, fs * .85)); y += bh + gap;
+    ctx.fillStyle = c; ctx.fillRect(bx, y, bw, bhs[i]); q.buttons.push({ x: bx, y, w: bw, h: bhs[i] });
+    ctx.font = "bold " + fa + "px monospace";
+    L.forEach((l, j) => txt(l, bx + 10, y + pad + lh * (j + .78), fa, "#fff", "left")); y += bhs[i] + gap;
   });
-  if (q.state === "result") txt(q.msg, SW / 2, y + fs, fs, q.ok ? "#69f0ae" : "#ff8a80");
+  if (q.state === "result") txt(q.msg, SW / 2, y + f, f, q.ok ? "#69f0ae" : "#ff8a80");
 }
 
 /* ================= 12. INPUT (teclado / mouse / toque) ================= */
